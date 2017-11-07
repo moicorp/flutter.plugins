@@ -38,9 +38,6 @@
       [FIRApp configure];
     }
     [FIRMessaging messaging].delegate = self;
-#if defined(__IPHONE_10_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_10_0
-      [UNUserNotificationCenter currentNotificationCenter].delegate = self;
-#endif
   }
   return self;
 }
@@ -48,21 +45,28 @@
 - (void)handleMethodCall:(FlutterMethodCall *)call result:(FlutterResult)result {
   NSString *method = call.method;
   if ([@"requestNotificationPermissions" isEqualToString:method]) {
-    UIUserNotificationType notificationTypes = 0;
-    NSDictionary *arguments = call.arguments;
-    if (arguments[@"sound"]) {
-      notificationTypes |= UIUserNotificationTypeSound;
-    }
-    if (arguments[@"alert"]) {
-      notificationTypes |= UIUserNotificationTypeAlert;
-    }
-    if (arguments[@"badge"]) {
-      notificationTypes |= UIUserNotificationTypeBadge;
-    }
-    UIUserNotificationSettings *settings =
+    if (@available(iOS 10, *)) {
+        UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+        [center requestAuthorizationWithOptions:(UNAuthorizationOptionAlert + UNAuthorizationOptionSound)
+                              completionHandler:^(BOOL granted, NSError *_Nullable error) {
+                                  result(nil);
+                              }];
+    }else{
+        UIUserNotificationType notificationTypes = 0;
+        NSDictionary *arguments = call.arguments;
+        if (arguments[@"sound"]) {
+            notificationTypes |= UIUserNotificationTypeSound;
+        }
+        if (arguments[@"alert"]) {
+            notificationTypes |= UIUserNotificationTypeAlert;
+        }
+        if (arguments[@"badge"]) {
+            notificationTypes |= UIUserNotificationTypeBadge;
+        }
+        UIUserNotificationSettings *settings =
         [UIUserNotificationSettings settingsForTypes:notificationTypes categories:nil];
-    [[UIApplication sharedApplication] registerUserNotificationSettings:settings];
-
+        [[UIApplication sharedApplication] registerUserNotificationSettings:settings];
+    }
     result(nil);
   } else if ([@"configure" isEqualToString:method]) {
     [[UIApplication sharedApplication] registerForRemoteNotifications];
@@ -104,6 +108,9 @@
     didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
   if (launchOptions != nil) {
     _launchNotification = launchOptions[UIApplicationLaunchOptionsRemoteNotificationKey];
+  }
+  if (@available(iOS 10, *)) {
+    [UNUserNotificationCenter currentNotificationCenter].delegate = self;
   }
   return YES;
 }
@@ -161,15 +168,18 @@
 
 #pragma mark - UNUserNotificationCenterDelegate
 
+#if defined(__IPHONE_10_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_10_0
 - (void)userNotificationCenter:(UNUserNotificationCenter *)center willPresentNotification:(UNNotification *)notification withCompletionHandler:(void (^)(UNNotificationPresentationOptions options))completionHandler {
-    completionHandler(UNNotificationPresentationOptionAlert | UNNotificationPresentationOptionSound);
+  [self didReceiveRemoteNotification:notification.request.content.userInfo];
+  completionHandler(UNNotificationPresentationOptionAlert | UNNotificationPresentationOptionSound);
 }
 
 - (void)userNotificationCenter:(UNUserNotificationCenter *)center didReceiveNotificationResponse:(UNNotificationResponse *)response withCompletionHandler:(void (^)(void))completionHandler {
-    if ([response.actionIdentifier isEqualToString:UNNotificationDefaultActionIdentifier]) {
-        [_channel invokeMethod:@"onLaunch" arguments:response.notification.request.content.userInfo];
-    }
-    completionHandler();
+  if ([response.actionIdentifier isEqualToString:UNNotificationDefaultActionIdentifier]) {
+    [_channel invokeMethod:@"onLaunch" arguments:response.notification.request.content.userInfo];
+  }
+  completionHandler();
 }
+#endif
 
 @end
